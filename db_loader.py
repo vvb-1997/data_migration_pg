@@ -5,6 +5,7 @@ import re
 import os
 import sys
 import config
+import multiprocessing as mp
 
 def get_column_names(
         schemas: dict, ds_name: str, sorting_key: str='column_position'
@@ -27,7 +28,7 @@ def to_sql(
         df: pd.DataFrame, db_conn_uri: str,
         ds_name: str
     ) -> None:
-    df.to_sql(ds_name, db_conn_uri, if_exists='append', index=False)
+    df.to_sql(ds_name, db_conn_uri, if_exists='replace', index=False)
 
 def db_loader(
         src_base_dir: str, db_conn_uri: str,
@@ -46,6 +47,19 @@ def db_loader(
             print(f"Populating chunck {idx} of {ds_name}")
             to_sql(df, db_conn_uri, ds_name)
 
+def process_dataset(
+        ds_name: str, src_base_dir: str, db_conn_uri: str
+    ) -> None:
+    print(f"Processing {ds_name}")
+    try:
+        db_loader(src_base_dir, db_conn_uri, ds_name)
+    except NameError as ne:
+        print(f"Error processing {ds_name}: {ne}")
+    except Exception as e:
+        print(f"Error Encountered {ds_name}: {e}")
+    finally:
+        print(f"Completed processing for {ds_name}")
+
 def process_files(ds_names = None) -> None:
     src_base_dir = config.SRC_BASE_DIR
     db_host = config.DB_HOST
@@ -60,16 +74,18 @@ def process_files(ds_names = None) -> None:
     if not ds_names:
         ds_names = schemas.keys()
     
-    for ds_name in ds_names:
-        print(f"Processing {ds_name}")
-        try:
-            db_loader(src_base_dir, db_conn_uri, ds_name)
-        except NameError as ne:
-            print(f"Error processing {ds_name}: {ne}")
-        except Exception as e:
-            print(f"Error Encountered {ds_name}: {e}")
-        finally:
-            print(f"Completed processing for {ds_name}")
+    processes = min(4, len(ds_names))
+    pool = mp.Pool(processes)
+    
+    # synchronous
+    # for ds_name in ds_names:
+    #     process_dataset(ds_name, src_base_dir, db_conn_uri)
+    
+    # asynchronous
+    pool.starmap(
+        process_dataset,
+        [(ds_name, src_base_dir, db_conn_uri,) for ds_name in ds_names]
+    )
 
 if __name__ == "__main__":
     ds_names = None
